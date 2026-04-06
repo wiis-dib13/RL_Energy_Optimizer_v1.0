@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Java - RL Simulation</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <style>
+        /* --- LE LOOK JAVA SWING --- */
+        body {
+            background-color: #555; /* Fond sombre derrière la fenêtre */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Tahoma, Dialog, Arial, sans-serif;
+            font-size: 12px;
+        }
+
+        /* La fausse fenêtre (JFrame) */
+        .jframe {
+            background-color: #f0f0f0; /* Le gris Swing classique */
+            width: 900px;
+            height: 600px;
+            border: 2px outset #ffffff;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Fausse barre de titre Windows/Java */
+        .title-bar {
+            background: linear-gradient(to right, #000080, #1084d0);
+            color: white;
+            padding: 3px 8px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+
+        .title-bar-controls button {
+            background-color: #c0c0c0;
+            border: 2px outset #ffffff;
+            width: 16px;
+            height: 16px;
+            font-size: 10px;
+            line-height: 10px;
+            padding: 0;
+            cursor: pointer;
+            margin-left: 2px;
+        }
+        .title-bar-controls button:active { border: 2px inset #ffffff; }
+
+        /* Contenu principal (BorderLayout) */
+        .content-pane {
+            display: flex;
+            padding: 10px;
+            gap: 10px;
+            height: calc(100% - 25px);
+            box-sizing: border-box;
+        }
+
+        /* Panneau de gauche (JPanel) */
+        .left-panel {
+            width: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Panneau central */
+        .center-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Faux TitledBorder Swing */
+        fieldset {
+            border: 1px solid #a0a0a0;
+            padding: 10px;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        legend {
+            color: #0000ee; /* Bleu classique des titres Swing */
+            padding: 0 5px;
+        }
+
+        /* Contrôles (JTextField, JLabel, JButton) */
+        label { margin-bottom: 2px; display: block; }
+        
+        input[type="number"] {
+            width: 100%;
+            padding: 3px;
+            border: 2px inset #ffffff;
+            background-color: white;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+
+        button.swing-btn {
+            background-color: #e0e0e0;
+            border: 2px outset #ffffff;
+            padding: 5px 10px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button.swing-btn:active {
+            border: 2px inset #ffffff;
+            padding: 6px 9px 4px 11px; /* Effet d'enfoncement */
+        }
+        button.swing-btn[disabled] {
+            color: #888;
+            border: 2px outset #ffffff;
+        }
+
+        /* Zone d'affichage des stats */
+        .stats-grid {
+            display: flex;
+            gap: 10px;
+        }
+        .stat-box {
+            flex: 1;
+            background-color: white;
+            border: 2px inset #ffffff;
+            padding: 10px;
+            text-align: center;
+        }
+        .stat-value { font-size: 18px; font-weight: bold; margin-top: 5px; }
+
+        /* Conteneur Chart */
+        .chart-container {
+            flex-grow: 1;
+            background-color: white;
+            border: 2px inset #ffffff;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="jframe">
+        <div class="title-bar">
+            <span>☕ RLSimulationApp</span>
+            <div class="title-bar-controls">
+                <button>_</button><button>□</button><button>X</button>
+            </div>
+        </div>
+
+        <div class="content-pane">
+            
+            <div class="left-panel">
+                <fieldset>
+                    <legend>Configuration</legend>
+                    
+                    <label>Nombre de Caméras :</label>
+                    <input type="number" id="cameras" value="15">
+                    
+                    <label>Nombre d'Epochs :</label>
+                    <input type="number" id="epochs" value="100">
+                    
+                    <button id="startBtn" class="swing-btn" onclick="startSimulation()">Démarrer</button>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Console</legend>
+                    <div id="statusText" style="color: #666; font-family: monospace;">En attente...</div>
+                </fieldset>
+            </div>
+
+            <div class="center-panel">
+                <fieldset>
+                    <legend>Métriques en temps réel</legend>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div>Epoch Actuelle</div>
+                            <div class="stat-value" id="currentEpoch">0 / 0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div>Énergie (kW/h)</div>
+                            <div class="stat-value" id="energyValue">0.00</div>
+                        </div>
+                        <div class="stat-box">
+                            <div>Reward</div>
+                            <div class="stat-value" id="rewardValue" style="color: green;">0.00</div>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset style="flex-grow: 1; display: flex; flex-direction: column;">
+                    <legend>JFreeChart Panel</legend>
+                    <div class="chart-container">
+                        <canvas id="energyChart"></canvas>
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialisation de Chart.js pour ressembler à JFreeChart
+        document.addEventListener('DOMContentLoaded', function() {
+            const ctx = document.getElementById('energyChart').getContext('2d');
+            window.energyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Consommation',
+                        data: [],
+                        borderColor: '#ff0000', // Rouge classique
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0, // Pas de ronds sur la ligne pour faire plus "brut"
+                        tension: 0 // Ligne brisée (pas courbée) typique des vieux graphiques
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // On désactive les animations web fluides
+                    scales: {
+                        y: { 
+                            grid: { color: '#e0e0e0' }, 
+                            ticks: { color: '#000', font: {family: 'Tahoma', size: 10} } 
+                        },
+                        x: { 
+                            grid: { color: '#e0e0e0' }, 
+                            ticks: { color: '#000', font: {family: 'Tahoma', size: 10} } 
+                        }
+                    },
+                    plugins: { 
+                        legend: { display: false } 
+                    }
+                }
+            });
+        });
+
+        let simulationInterval;
+
+        function startSimulation() {
+            const numCameras = parseInt(document.getElementById('cameras').value);
+            const totalEpochs = parseInt(document.getElementById('epochs').value);
+            const btn = document.getElementById('startBtn');
+            const status = document.getElementById('statusText');
+            
+            btn.disabled = true;
+            status.innerHTML = "Simulation en cours...";
+            status.style.color = "blue";
+            
+            window.energyChart.data.labels = [];
+            window.energyChart.data.datasets[0].data = [];
+            
+            let currentEpoch = 0;
+            let currentReward = -500;
+            let baseEnergy = numCameras * 15; 
+
+            clearInterval(simulationInterval);
+
+            simulationInterval = setInterval(() => {
+                currentEpoch++;
+
+                let noise = (Math.random() * 2 - 1) * (baseEnergy * 0.05);
+                let learningFactor = Math.exp(-currentEpoch / (totalEpochs / 4));
+                let currentEnergy = (baseEnergy * 0.4) + (baseEnergy * 0.6 * learningFactor) + noise;
+                
+                currentReward += (baseEnergy - currentEnergy) * 0.1;
+
+                document.getElementById('currentEpoch').innerText = `${currentEpoch} / ${totalEpochs}`;
+                document.getElementById('energyValue').innerText = currentEnergy.toFixed(2);
+                document.getElementById('rewardValue').innerText = `+${currentReward.toFixed(0)}`;
+                
+                window.energyChart.data.labels.push(currentEpoch);
+                window.energyChart.data.datasets[0].data.push(currentEnergy);
+                window.energyChart.update();
+
+                if (currentEpoch >= totalEpochs) {
+                    clearInterval(simulationInterval);
+                    btn.disabled = false;
+                    status.innerHTML = "Processus terminé.";
+                    status.style.color = "black";
+                }
+            }, 50); // Vitesse de la simulation
+        }
+    </script>
+</body>
+</html>
