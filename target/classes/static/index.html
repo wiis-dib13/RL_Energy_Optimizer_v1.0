@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Java - RL Simulation (Spring Boot)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <style>
+        body {
+            background-color: #555;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Tahoma, Dialog, Arial, sans-serif;
+            font-size: 12px;
+        }
+
+        .jframe {
+            background-color: #f0f0f0;
+            width: 900px;
+            height: 600px;
+            border: 2px outset #ffffff;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .title-bar {
+            background: linear-gradient(to right, #000080, #1084d0);
+            color: white;
+            padding: 3px 8px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+
+        .title-bar-controls button {
+            background-color: #c0c0c0;
+            border: 2px outset #ffffff;
+            width: 16px;
+            height: 16px;
+            font-size: 10px;
+            line-height: 10px;
+            padding: 0;
+            cursor: pointer;
+            margin-left: 2px;
+        }
+        .title-bar-controls button:active { border: 2px inset #ffffff; }
+
+        .content-pane {
+            display: flex;
+            padding: 10px;
+            gap: 10px;
+            height: calc(100% - 25px);
+            box-sizing: border-box;
+        }
+
+        .left-panel {
+            width: 200px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .center-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        fieldset {
+            border: 1px solid #a0a0a0;
+            padding: 10px;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        legend {
+            color: #0000ee;
+            padding: 0 5px;
+        }
+
+        label { margin-bottom: 2px; display: block; }
+
+        input[type="number"] {
+            width: 100%;
+            padding: 3px;
+            border: 2px inset #ffffff;
+            background-color: white;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+
+        button.swing-btn {
+            background-color: #e0e0e0;
+            border: 2px outset #ffffff;
+            padding: 5px 10px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button.swing-btn:active {
+            border: 2px inset #ffffff;
+            padding: 6px 9px 4px 11px;
+        }
+        button.swing-btn[disabled] {
+            color: #888;
+            border: 2px outset #ffffff;
+        }
+
+        .stats-grid {
+            display: flex;
+            gap: 10px;
+        }
+        .stat-box {
+            flex: 1;
+            background-color: white;
+            border: 2px inset #ffffff;
+            padding: 10px;
+            text-align: center;
+        }
+        .stat-value { font-size: 18px; font-weight: bold; margin-top: 5px; }
+
+        .chart-container {
+            flex-grow: 1;
+            background-color: white;
+            border: 2px inset #ffffff;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="jframe">
+        <div class="title-bar">
+            <span>☕ RLSimulationApp &mdash; Spring Boot</span>
+            <div class="title-bar-controls">
+                <button>_</button><button>□</button><button>X</button>
+            </div>
+        </div>
+
+        <div class="content-pane">
+
+            <div class="left-panel">
+                <fieldset>
+                    <legend>Configuration</legend>
+
+                    <label>Nombre de Caméras :</label>
+                    <input type="number" id="cameras" value="16">
+
+                    <label>Nombre d'Épisodes :</label>
+                    <input type="number" id="epochs" value="200">
+
+                    <button id="startBtn" class="swing-btn" onclick="startSimulation()">Démarrer</button>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Console (Java backend)</legend>
+                    <div id="statusText" style="color: #666; font-family: monospace;">En attente...</div>
+                </fieldset>
+            </div>
+
+            <div class="center-panel">
+                <fieldset>
+                    <legend>Métriques en temps réel</legend>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div>Épisode</div>
+                            <div class="stat-value" id="currentEpoch">0 / 0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div>Énergie (kJ)</div>
+                            <div class="stat-value" id="energyValue">0.0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div>Meilleure Action</div>
+                            <div class="stat-value" id="rewardValue" style="color: green;">&mdash;</div>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset style="flex-grow: 1; display: flex; flex-direction: column;">
+                    <legend>JFreeChart Panel &mdash; Q-values</legend>
+                    <div class="chart-container">
+                        <canvas id="energyChart"></canvas>
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ACTION_NAMES  = ["EDGE", "PROXY", "CAMERA", "CLOUD"];
+        const ACTION_COLORS = ["#008000", "#0000ee", "#ff8c00", "#c00000"];
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const ctx = document.getElementById('energyChart').getContext('2d');
+            window.energyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: ACTION_NAMES.map((name, i) => ({
+                        label: name,
+                        data: [],
+                        borderColor: ACTION_COLORS[i],
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        y: { title: { display: true, text: 'Q-value', font: { family: 'Tahoma', size: 11 } },
+                             grid: { color: '#e0e0e0' },
+                             ticks: { color: '#000', font: { family: 'Tahoma', size: 10 } } },
+                        x: { title: { display: true, text: 'Épisode', font: { family: 'Tahoma', size: 11 } },
+                             grid: { color: '#e0e0e0' },
+                             ticks: { color: '#000', font: { family: 'Tahoma', size: 10 } } }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: { font: { family: 'Tahoma', size: 11 } }
+                        }
+                    }
+                }
+            });
+        });
+
+        let currentEventSource = null;
+
+        function startSimulation() {
+            const numCameras  = parseInt(document.getElementById('cameras').value);
+            const totalEpochs = parseInt(document.getElementById('epochs').value);
+            const btn    = document.getElementById('startBtn');
+            const status = document.getElementById('statusText');
+
+            btn.disabled = true;
+            status.innerHTML = "[Java] Connexion au backend Spring Boot...";
+            status.style.color = "blue";
+
+            // Reset chart
+            window.energyChart.data.labels = [];
+            window.energyChart.data.datasets.forEach(ds => ds.data = []);
+            window.energyChart.update();
+
+            if (currentEventSource) currentEventSource.close();
+
+            const url = `/api/simulate?cameras=${numCameras}&episodes=${totalEpochs}&delayMs=50`;
+            const es  = new EventSource(url);
+            currentEventSource = es;
+
+            status.innerHTML = "[Java] Q-Learning en cours sur le serveur...";
+
+            es.addEventListener('step', (event) => {
+                const step = JSON.parse(event.data);
+
+                document.getElementById('currentEpoch').innerText =
+                    `${step.episode} / ${totalEpochs}`;
+                document.getElementById('energyValue').innerText =
+                    step.bestEnergyKJ.toFixed(1);
+
+                const rv = document.getElementById('rewardValue');
+                rv.innerText   = step.bestActionName;
+                rv.style.color = ACTION_COLORS[step.bestAction];
+
+                window.energyChart.data.labels.push(step.episode);
+                for (let a = 0; a < 4; a++) {
+                    window.energyChart.data.datasets[a].data.push(step.qValues[a]);
+                }
+                window.energyChart.update();
+            });
+
+            es.addEventListener('done', (event) => {
+                const best      = document.getElementById('rewardValue').innerText;
+                const energyKJ  = parseFloat(document.getElementById('energyValue').innerText);
+                const CLOUD_KJ  = 3233.631;
+                const savings   = (1 - energyKJ / CLOUD_KJ) * 100;
+
+                status.innerHTML =
+                    "[Java] Terminé &check;<br>" +
+                    "Choisi : <b>" + best + "</b><br>" +
+                    "Énergie : " + energyKJ.toFixed(1) + " kJ<br>" +
+                    "Gain : " + savings.toFixed(1) + "% vs CLOUD";
+                status.style.color = "black";
+
+                btn.disabled = false;
+                es.close();
+                currentEventSource = null;
+            });
+
+            es.onerror = () => {
+                status.innerHTML = "[Java] Erreur de connexion au backend.";
+                status.style.color = "red";
+                btn.disabled = false;
+                es.close();
+                currentEventSource = null;
+            };
+        }
+    </script>
+</body>
+</html>

@@ -1,17 +1,48 @@
 # RL_Energy_Optimizer_v1.0
-RL Energy Simulator (Swing Edition)
-Technologies utilisées :
 
-Java Development Kit (JDK) 17
+Q-Learning Energy Optimizer pour Fog Computing — version Spring Boot.
 
-Swing UI Library
+## Technologies
 
-JFreeChart (pour les graphiques en temps réel)
+- **Java 17** (JDK)
+- **Spring Boot 3.3** (backend web + REST)
+- **Server-Sent Events** (streaming des épisodes RL en temps réel)
+- **Chart.js** (visualisation style JFreeChart)
+- **Maven** (build)
 
-Comment lancer l'application :
+## Architecture
 
-Clonez le dépôt.
+```
+src/main/java/com/fadi/rloptimizer/
+├── RlOptimizerApplication.java      # Spring Boot main
+├── rl/
+│   ├── EnergyModel.java             # Valeurs d'énergie réelles (iFogSim)
+│   └── RLAgent.java                 # Agent Q-Learning (ε-greedy + UCB)
+└── api/
+    ├── SimulationController.java    # REST /api/simulate (SSE)
+    └── SimulationStep.java          # DTO
 
-Compilez le projet avec Maven : mvn clean install
+src/main/resources/static/index.html # UI (Swing-look)
+```
 
-Lancez le fichier JAR généré : java -jar target/rl-sim-1.0.jar
+Les fichiers à la racine (`DCNSFog_4fogs`, `moduleplacementmapping.java`, etc.)
+sont la version iFogSim/CloudSim d'origine qui a produit les mesures d'énergie
+réelles utilisées par le backend Spring Boot.
+
+## Lancer l'application
+
+Maven est embarqué dans le dossier `apache-maven-3.9.15/`, un wrapper `mvnw.cmd`
+est fourni.
+
+```cmd
+mvnw spring-boot:run
+```
+
+Puis ouvre **http://localhost:8080** dans un navigateur.
+
+## Build d'un JAR autonome
+
+```cmd
+mvnw clean package
+java -jar target/rl-sim-1.0.jar
+```

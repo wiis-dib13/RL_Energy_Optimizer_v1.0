@@ -160,11 +160,11 @@
                     <legend>Configuration</legend>
                     
                     <label>Nombre de Caméras :</label>
-                    <input type="number" id="cameras" value="15">
-                    
-                    <label>Nombre d'Epochs :</label>
-                    <input type="number" id="epochs" value="100">
-                    
+                    <input type="number" id="cameras" value="16">
+
+                    <label>Nombre d'Épisodes :</label>
+                    <input type="number" id="epochs" value="200">
+
                     <button id="startBtn" class="swing-btn" onclick="startSimulation()">Démarrer</button>
                 </fieldset>
 
@@ -179,16 +179,16 @@
                     <legend>Métriques en temps réel</legend>
                     <div class="stats-grid">
                         <div class="stat-box">
-                            <div>Epoch Actuelle</div>
+                            <div>Épisode</div>
                             <div class="stat-value" id="currentEpoch">0 / 0</div>
                         </div>
                         <div class="stat-box">
-                            <div>Énergie (kW/h)</div>
-                            <div class="stat-value" id="energyValue">0.00</div>
+                            <div>Énergie (kJ)</div>
+                            <div class="stat-value" id="energyValue">0.0</div>
                         </div>
                         <div class="stat-box">
-                            <div>Reward</div>
-                            <div class="stat-value" id="rewardValue" style="color: green;">0.00</div>
+                            <div>Meilleure Action</div>
+                            <div class="stat-value" id="rewardValue" style="color: green;">—</div>
                         </div>
                     </div>
                 </fieldset>
@@ -204,39 +204,126 @@
     </div>
 
     <script>
-        // Initialisation de Chart.js pour ressembler à JFreeChart
-        document.addEventListener('DOMContentLoaded', function() {
+        // ==========================================================
+        //  AGENT Q-LEARNING RÉEL — porté de ModulePlacementMapping.java
+        // ==========================================================
+
+        // Hyperparamètres (identiques au code Java)
+        const ALPHA = 0.15;
+        const GAMMA = 0.90;
+        const EPSILON_START = 1.0;
+        const EPSILON_MIN = 0.05;
+        const EPSILON_DECAY = 0.99;
+        const UCB_C = 2.0;
+
+        const W_ENERGY  = 0.85;
+        const W_LOAD    = 0.10;
+        const W_LATENCY = 0.05;
+
+        const N_ACTIONS = 4;
+        const ACTION_NAMES  = ["EDGE", "PROXY", "CAMERA", "CLOUD"];
+        const ACTION_COLORS = ["#008000", "#0000ee", "#ff8c00", "#c00000"];
+
+        // Valeurs réelles mesurées (Joules) — affichage before and after.txt
+        const CLOUD_ENERGY  = 3233631;
+        const EDGE_ENERGY   = 166866;
+        const CAMERA_ENERGY = 169221;
+
+        function estimatedEnergy(action, numCameras) {
+            switch (action) {
+                case 0: return EDGE_ENERGY;                         // EDGE (fog routers)
+                case 1: return EDGE_ENERGY * 1.2;                   // PROXY
+                case 2: return CAMERA_ENERGY * (numCameras / 4);    // CAMERA (scale)
+                case 3: return CLOUD_ENERGY;                        // CLOUD
+            }
+        }
+        function overloadScore(a) { return [0.10, 0.40, 0.80, 0.05][a]; }
+        function latencyScore(a)  { return [0.15, 0.35, 0.05, 0.70][a]; }
+
+        function rewardFor(action, numCameras) {
+            const normEnergy  = estimatedEnergy(action, numCameras) / CLOUD_ENERGY;
+            const normLoad    = overloadScore(action);
+            const normLatency = latencyScore(action);
+            const penalty     = W_ENERGY * normEnergy + W_LOAD * normLoad + W_LATENCY * normLatency;
+            const actionBonus = action === 0 ? 0.3 : action === 3 ? -0.5 : 0;
+            return -penalty + actionBonus;
+        }
+
+        class RLAgent {
+            constructor(numCameras) {
+                this.numCameras = numCameras;
+                this.Q = new Array(N_ACTIONS).fill(0);
+                this.visits = new Array(N_ACTIONS).fill(0);
+                this.totalVisits = 0;
+                this.epsilon = EPSILON_START;
+                for (let a = 0; a < N_ACTIONS; a++) this.Q[a] = rewardFor(a, numCameras);
+            }
+            greedy() {
+                let best = 0;
+                for (let i = 1; i < N_ACTIONS; i++) if (this.Q[i] > this.Q[best]) best = i;
+                return best;
+            }
+            ucbSelect() {
+                let best = 0, bestValue = -Infinity;
+                for (let a = 0; a < N_ACTIONS; a++) {
+                    const bonus = this.visits[a] === 0
+                        ? Number.MAX_VALUE
+                        : UCB_C * Math.sqrt(Math.log(this.totalVisits + 1) / this.visits[a]);
+                    const v = this.Q[a] + bonus;
+                    if (v > bestValue) { bestValue = v; best = a; }
+                }
+                return best;
+            }
+            selectAction() {
+                return Math.random() < this.epsilon ? this.ucbSelect() : this.greedy();
+            }
+            update(action, reward) {
+                const maxNext = this.Q[this.greedy()];
+                const alpha = ALPHA / (1 + 0.02 * this.visits[action]);
+                this.Q[action] += alpha * (reward + GAMMA * maxNext - this.Q[action]);
+                this.visits[action]++;
+                this.totalVisits++;
+                this.epsilon = Math.max(EPSILON_MIN, this.epsilon * EPSILON_DECAY);
+            }
+        }
+
+        // ==========================================================
+        //  GRAPHIQUE — 4 courbes (une par action) style JFreeChart
+        // ==========================================================
+        document.addEventListener('DOMContentLoaded', function () {
             const ctx = document.getElementById('energyChart').getContext('2d');
             window.energyChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: [],
-                    datasets: [{
-                        label: 'Consommation',
+                    datasets: ACTION_NAMES.map((name, i) => ({
+                        label: name,
                         data: [],
-                        borderColor: '#ff0000', // Rouge classique
+                        borderColor: ACTION_COLORS[i],
                         backgroundColor: 'transparent',
                         borderWidth: 1.5,
-                        pointRadius: 0, // Pas de ronds sur la ligne pour faire plus "brut"
-                        tension: 0 // Ligne brisée (pas courbée) typique des vieux graphiques
-                    }]
+                        pointRadius: 0,
+                        tension: 0
+                    }))
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    animation: false, // On désactive les animations web fluides
+                    animation: false,
                     scales: {
-                        y: { 
-                            grid: { color: '#e0e0e0' }, 
-                            ticks: { color: '#000', font: {family: 'Tahoma', size: 10} } 
-                        },
-                        x: { 
-                            grid: { color: '#e0e0e0' }, 
-                            ticks: { color: '#000', font: {family: 'Tahoma', size: 10} } 
-                        }
+                        y: { title: { display: true, text: 'Q-value', font: { family: 'Tahoma', size: 11 } },
+                             grid: { color: '#e0e0e0' },
+                             ticks: { color: '#000', font: { family: 'Tahoma', size: 10 } } },
+                        x: { title: { display: true, text: 'Épisode', font: { family: 'Tahoma', size: 11 } },
+                             grid: { color: '#e0e0e0' },
+                             ticks: { color: '#000', font: { family: 'Tahoma', size: 10 } } }
                     },
-                    plugins: { 
-                        legend: { display: false } 
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: { font: { family: 'Tahoma', size: 11 } }
+                        }
                     }
                 }
             });
@@ -245,48 +332,63 @@
         let simulationInterval;
 
         function startSimulation() {
-            const numCameras = parseInt(document.getElementById('cameras').value);
+            const numCameras  = parseInt(document.getElementById('cameras').value);
             const totalEpochs = parseInt(document.getElementById('epochs').value);
-            const btn = document.getElementById('startBtn');
+            const btn    = document.getElementById('startBtn');
             const status = document.getElementById('statusText');
-            
+
             btn.disabled = true;
-            status.innerHTML = "Simulation en cours...";
+            status.innerHTML = "[RL] Démarrage — CLOUD=" + (CLOUD_ENERGY/1000).toFixed(0)
+                             + "kJ vs EDGE=" + (EDGE_ENERGY/1000).toFixed(0) + "kJ";
             status.style.color = "blue";
-            
+
+            // Reset chart
             window.energyChart.data.labels = [];
-            window.energyChart.data.datasets[0].data = [];
-            
+            window.energyChart.data.datasets.forEach(ds => ds.data = []);
+
+            const agent = new RLAgent(numCameras);
             let currentEpoch = 0;
-            let currentReward = -500;
-            let baseEnergy = numCameras * 15; 
 
             clearInterval(simulationInterval);
 
             simulationInterval = setInterval(() => {
                 currentEpoch++;
 
-                let noise = (Math.random() * 2 - 1) * (baseEnergy * 0.05);
-                let learningFactor = Math.exp(-currentEpoch / (totalEpochs / 4));
-                let currentEnergy = (baseEnergy * 0.4) + (baseEnergy * 0.6 * learningFactor) + noise;
-                
-                currentReward += (baseEnergy - currentEnergy) * 0.1;
+                // Un épisode = sélection + récompense + mise à jour Q
+                const action = agent.selectAction();
+                const reward = rewardFor(action, numCameras);
+                agent.update(action, reward);
+
+                const best = agent.greedy();
+                const bestEnergyKJ = estimatedEnergy(best, numCameras) / 1000;
 
                 document.getElementById('currentEpoch').innerText = `${currentEpoch} / ${totalEpochs}`;
-                document.getElementById('energyValue').innerText = currentEnergy.toFixed(2);
-                document.getElementById('rewardValue').innerText = `+${currentReward.toFixed(0)}`;
-                
+                document.getElementById('energyValue').innerText  = bestEnergyKJ.toFixed(1);
+                const rv = document.getElementById('rewardValue');
+                rv.innerText   = ACTION_NAMES[best];
+                rv.style.color = ACTION_COLORS[best];
+
+                // Mettre à jour les 4 courbes Q-values
                 window.energyChart.data.labels.push(currentEpoch);
-                window.energyChart.data.datasets[0].data.push(currentEnergy);
+                for (let a = 0; a < N_ACTIONS; a++) {
+                    window.energyChart.data.datasets[a].data.push(agent.Q[a]);
+                }
                 window.energyChart.update();
 
                 if (currentEpoch >= totalEpochs) {
                     clearInterval(simulationInterval);
                     btn.disabled = false;
-                    status.innerHTML = "Processus terminé.";
+
+                    const savings = (1 - estimatedEnergy(best, numCameras) / CLOUD_ENERGY) * 100;
+                    status.innerHTML =
+                        "[RL] Terminé ✓<br>" +
+                        "Choisi : <b>" + ACTION_NAMES[best] + "</b><br>" +
+                        "Énergie : " + bestEnergyKJ.toFixed(1) + " kJ<br>" +
+                        "Gain : " + savings.toFixed(1) + "% vs CLOUD<br>" +
+                        "ε final : " + agent.epsilon.toFixed(3);
                     status.style.color = "black";
                 }
-            }, 50); // Vitesse de la simulation
+            }, 50);
         }
     </script>
 </body>

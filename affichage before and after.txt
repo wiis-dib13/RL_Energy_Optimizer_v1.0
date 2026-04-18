@@ -1,0 +1,81 @@
+this is with default edge:
+=========================================
+============== RESULTS ==================
+=========================================
+EXECUTION TIME : 5368
+=========================================
+APPLICATION LOOP DELAYS
+=========================================
+[motion_detector, object_detector, object_tracker] ---> 120.49721760796322
+[object_tracker, PTZ_CONTROL] ---> 3.0199999999999836
+=========================================
+TUPLE CPU EXECUTION DELAY
+=========================================
+MOTION_VIDEO_STREAM ---> 215.0
+DETECTED_OBJECT ---> 0.01116071428577925
+OBJECT_LOCATION ---> 4.99000000000002
+CAMERA ---> 2.0
+=========================================
+cloud : Energy Consumed = 2667422.675000015
+proxy-server : Energy Consumed = 166866.59999999995
+fog-0 : Energy Consumed = 214678.0000000019
+m-0-0 : Energy Consumed = 169221.7700000009
+m-0-1 : Energy Consumed = 169221.7700000009
+m-0-2 : Energy Consumed = 169221.7700000009
+m-0-3 : Energy Consumed = 169221.7700000009
+fog-1 : Energy Consumed = 214678.0000000019
+m-1-0 : Energy Consumed = 169221.7700000009
+m-1-1 : Energy Consumed = 169221.7700000009
+m-1-2 : Energy Consumed = 169221.7700000009
+m-1-3 : Energy Consumed = 169221.7700000009
+fog-2 : Energy Consumed = 214678.0000000019
+m-2-0 : Energy Consumed = 169221.7700000009
+m-2-1 : Energy Consumed = 169221.7700000009
+m-2-2 : Energy Consumed = 169221.7700000009
+m-2-3 : Energy Consumed = 169221.7700000009
+fog-3 : Energy Consumed = 214678.0000000019
+m-3-0 : Energy Consumed = 169221.7700000009
+m-3-1 : Energy Consumed = 169221.7700000009
+m-3-2 : Energy Consumed = 169221.7700000009
+m-3-3 : Energy Consumed = 169221.7700000009
+Cost of execution in cloud = 4852.400000002925
+Total network usage = 44404.4
+//////////////////////////////////////////////////////////
+and this with module placement mapping:
+=========================================
+============== RESULTS ==================
+=========================================
+EXECUTION TIME : 4501
+=========================================
+APPLICATION LOOP DELAYS
+=========================================
+[motion_detector, object_detector, object_tracker] ---> null
+=========================================
+TUPLE CPU EXECUTION DELAY
+=========================================
+CAMERA ---> 2.0
+=========================================
+cloud : Energy Consumed = 210110.30374999993
+proxy-server : Energy Consumed = 166866.59999999995
+fog-0 : Energy Consumed = 166866.59999999995
+m-0-0 : Energy Consumed = 169221.7700000009
+m-0-1 : Energy Consumed = 169221.7700000009
+m-0-2 : Energy Consumed = 169221.7700000009
+m-0-3 : Energy Consumed = 169221.7700000009
+fog-1 : Energy Consumed = 166866.59999999995
+m-1-0 : Energy Consumed = 169221.7700000009
+m-1-1 : Energy Consumed = 169221.7700000009
+m-1-2 : Energy Consumed = 169221.7700000009
+m-1-3 : Energy Consumed = 169221.7700000009
+fog-2 : Energy Consumed = 166866.59999999995
+m-2-0 : Energy Consumed = 169221.7700000009
+m-2-1 : Energy Consumed = 169221.7700000009
+m-2-2 : Energy Consumed = 169221.7700000009
+m-2-3 : Energy Consumed = 169221.7700000009
+fog-3 : Energy Consumed = 166866.59999999995
+m-3-0 : Energy Consumed = 169221.7700000009
+m-3-1 : Energy Consumed = 169221.7700000009
+m-3-2 : Energy Consumed = 169221.7700000009
+m-3-3 : Energy Consumed = 169221.7700000009
+Cost of execution in cloud = 810400.0
+Total network usage = 645364.0
