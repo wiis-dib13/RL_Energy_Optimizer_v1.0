@@ -28,7 +28,8 @@ public class SimulationController {
 
         pool.submit(() -> {
             try {
-                RLAgent agent = new RLAgent(cameras);
+                EnergyModel model = new EnergyModel(cameras);
+                RLAgent     agent = new RLAgent(model);
 
                 for (int ep = 1; ep <= episodes; ep++) {
                     int action    = agent.selectAction();
@@ -36,7 +37,7 @@ public class SimulationController {
                     agent.update(action, reward);
 
                     int best = agent.greedy();
-                    double bestEnergyKJ = EnergyModel.estimatedEnergy(best, cameras) / 1000.0;
+                    double bestEnergyKJ = model.estimatedEnergy(best) / 1000.0;
 
                     SimulationStep step = new SimulationStep(
                             ep,

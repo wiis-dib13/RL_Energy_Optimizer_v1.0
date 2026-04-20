@@ -2,38 +2,42 @@ package com.fadi.rloptimizer.rl;
 
 import java.util.Random;
 
+/**
+ * Agent Q-Learning (ε-greedy + UCB exploration).
+ * Chaque agent est instancié avec son propre EnergyModel (composition OO),
+ * ce qui rend le calcul des récompenses dépendant du nombre de caméras.
+ */
 public class RLAgent {
 
-    public static final double ALPHA          = 0.15;
-    public static final double GAMMA          = 0.90;
-    public static final double EPSILON_START  = 1.0;
-    public static final double EPSILON_MIN    = 0.05;
-    public static final double EPSILON_DECAY  = 0.99;
-    public static final double UCB_C          = 2.0;
+    public static final double ALPHA         = 0.15;
+    public static final double GAMMA         = 0.90;
+    public static final double EPSILON_START = 1.0;
+    public static final double EPSILON_MIN   = 0.05;
+    public static final double EPSILON_DECAY = 0.99;
+    public static final double UCB_C         = 2.0;
 
     public static final double W_ENERGY  = 0.85;
     public static final double W_LOAD    = 0.10;
     public static final double W_LATENCY = 0.05;
 
-    private final int numCameras;
-    private final double[] Q = new double[EnergyModel.N_ACTIONS];
-    private final int[] visits = new int[EnergyModel.N_ACTIONS];
+    private final EnergyModel model;                              // ← composition OO
+    private final double[] Q      = new double[EnergyModel.N_ACTIONS];
+    private final int[]    visits = new int[EnergyModel.N_ACTIONS];
     private int totalVisits = 0;
-    private double epsilon = EPSILON_START;
+    private double epsilon  = EPSILON_START;
     private final Random rand = new Random(42);
 
-    public RLAgent(int numCameras) {
-        this.numCameras = numCameras;
-        for (int a = 0; a < EnergyModel.N_ACTIONS; a++) {
-            Q[a] = rewardFor(a);
-        }
+    public RLAgent(EnergyModel model) {
+        this.model = model;
+        for (int a = 0; a < EnergyModel.N_ACTIONS; a++) Q[a] = rewardFor(a);
     }
+
+    public EnergyModel getModel() { return model; }
 
     public int greedy() {
         int best = 0;
-        for (int i = 1; i < EnergyModel.N_ACTIONS; i++) {
+        for (int i = 1; i < EnergyModel.N_ACTIONS; i++)
             if (Q[i] > Q[best]) best = i;
-        }
         return best;
     }
 
@@ -55,9 +59,9 @@ public class RLAgent {
     }
 
     public double rewardFor(int action) {
-        double normEnergy  = EnergyModel.estimatedEnergy(action, numCameras) / EnergyModel.CLOUD_ENERGY;
-        double normLoad    = EnergyModel.overloadScore(action);
-        double normLatency = EnergyModel.latencyScore(action);
+        double normEnergy  = model.estimatedEnergy(action) / model.maxEnergy();
+        double normLoad    = model.overloadScore(action);
+        double normLatency = model.latencyScore(action);
         double penalty = W_ENERGY * normEnergy + W_LOAD * normLoad + W_LATENCY * normLatency;
         double actionBonus = action == 0 ? 0.3 : action == 3 ? -0.5 : 0;
         return -penalty + actionBonus;
@@ -73,5 +77,5 @@ public class RLAgent {
     }
 
     public double[] getQValues() { return Q.clone(); }
-    public double getEpsilon()   { return epsilon; }
+    public double   getEpsilon() { return epsilon; }
 }
