@@ -1,6 +1,7 @@
 package com.fadi.rloptimizer.api;
 
 import com.fadi.rloptimizer.rl.EnergyModel;
+import com.fadi.rloptimizer.rl.ModelConfig;
 import com.fadi.rloptimizer.rl.RLAgent;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,12 @@ import java.util.concurrent.Executors;
 @RequestMapping("/api")
 public class SimulationController {
 
+    private final ModelConfig config;
     private final ExecutorService pool = Executors.newCachedThreadPool();
+
+    public SimulationController(ModelConfig config) {
+        this.config = config;
+    }
 
     @GetMapping(value = "/simulate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter simulate(
@@ -28,7 +34,7 @@ public class SimulationController {
 
         pool.submit(() -> {
             try {
-                EnergyModel model = new EnergyModel(cameras);
+                EnergyModel model = new EnergyModel(config, cameras);
                 RLAgent     agent = new RLAgent(model);
 
                 for (int ep = 1; ep <= episodes; ep++) {
@@ -42,11 +48,11 @@ public class SimulationController {
                     SimulationStep step = new SimulationStep(
                             ep,
                             action,
-                            EnergyModel.ACTION_NAMES[action],
+                            model.actionName(action),
                             reward,
                             agent.getQValues(),
                             best,
-                            EnergyModel.ACTION_NAMES[best],
+                            model.actionName(best),
                             bestEnergyKJ,
                             agent.getEpsilon()
                     );

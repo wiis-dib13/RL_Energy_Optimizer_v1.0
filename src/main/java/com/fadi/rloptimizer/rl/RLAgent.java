@@ -3,53 +3,48 @@ package com.fadi.rloptimizer.rl;
 import java.util.Random;
 
 /**
- * Agent Q-Learning (ε-greedy + UCB exploration).
- * Chaque agent est instancié avec son propre EnergyModel (composition OO),
- * ce qui rend le calcul des récompenses dépendant du nombre de caméras.
+ * Agent Q-Learning (ε-greedy + UCB).
+ * Tous les hyperparamètres (alpha, gamma, ε, UCB-C, poids de récompense)
+ * sont injectés depuis ModelConfig (chargé du JSON), aucune valeur en dur.
  */
 public class RLAgent {
 
-    public static final double ALPHA         = 0.15;
-    public static final double GAMMA         = 0.90;
-    public static final double EPSILON_START = 1.0;
-    public static final double EPSILON_MIN   = 0.05;
-    public static final double EPSILON_DECAY = 0.99;
-    public static final double UCB_C         = 2.0;
-
-    public static final double W_ENERGY  = 0.85;
-    public static final double W_LOAD    = 0.10;
-    public static final double W_LATENCY = 0.05;
-
-    private final EnergyModel model;                              // ← composition OO
-    private final double[] Q      = new double[EnergyModel.N_ACTIONS];
-    private final int[]    visits = new int[EnergyModel.N_ACTIONS];
-    private int totalVisits = 0;
-    private double epsilon  = EPSILON_START;
+    private final EnergyModel               model;
+    private final ModelConfig.RLConfig      rl;
+    private final ModelConfig.RewardWeights w;
+    private final double[] Q;
+    private final int[]    visits;
+    private int    totalVisits = 0;
+    private double epsilon;
     private final Random rand = new Random(42);
 
     public RLAgent(EnergyModel model) {
-        this.model = model;
-        for (int a = 0; a < EnergyModel.N_ACTIONS; a++) Q[a] = rewardFor(a);
+        this.model   = model;
+        this.rl      = model.getConfig().rl();
+        this.w       = model.getConfig().weights();
+        this.Q       = new double[model.nActions()];
+        this.visits  = new int[model.nActions()];
+        this.epsilon = rl.epsilonStart();
+        for (int a = 0; a < model.nActions(); a++) Q[a] = rewardFor(a);
     }
 
     public EnergyModel getModel() { return model; }
 
     public int greedy() {
         int best = 0;
-        for (int i = 1; i < EnergyModel.N_ACTIONS; i++)
-            if (Q[i] > Q[best]) best = i;
+        for (int i = 1; i < Q.length; i++) if (Q[i] > Q[best]) best = i;
         return best;
     }
 
     public int ucbSelect() {
         int best = 0;
         double bestValue = Double.NEGATIVE_INFINITY;
-        for (int a = 0; a < EnergyModel.N_ACTIONS; a++) {
+        for (int a = 0; a < Q.length; a++) {
             double bonus = visits[a] == 0
                     ? Double.MAX_VALUE
-                    : UCB_C * Math.sqrt(Math.log(totalVisits + 1) / visits[a]);
-            double value = Q[a] + bonus;
-            if (value > bestValue) { bestValue = value; best = a; }
+                    : rl.ucbC() * Math.sqrt(Math.log(totalVisits + 1) / visits[a]);
+            double v = Q[a] + bonus;
+            if (v > bestValue) { bestValue = v; best = a; }
         }
         return best;
     }
@@ -62,18 +57,17 @@ public class RLAgent {
         double normEnergy  = model.estimatedEnergy(action) / model.maxEnergy();
         double normLoad    = model.overloadScore(action);
         double normLatency = model.latencyScore(action);
-        double penalty = W_ENERGY * normEnergy + W_LOAD * normLoad + W_LATENCY * normLatency;
-        double actionBonus = action == 0 ? 0.3 : action == 3 ? -0.5 : 0;
-        return -penalty + actionBonus;
+        double penalty = w.energy() * normEnergy + w.load() * normLoad + w.latency() * normLatency;
+        return -penalty + model.actionBonus(action);
     }
 
     public void update(int action, double reward) {
         double maxNext = Q[greedy()];
-        double alpha = ALPHA / (1 + 0.02 * visits[action]);
-        Q[action] += alpha * (reward + GAMMA * maxNext - Q[action]);
+        double alpha = rl.alpha() / (1 + 0.02 * visits[action]);
+        Q[action] += alpha * (reward + rl.gamma() * maxNext - Q[action]);
         visits[action]++;
         totalVisits++;
-        epsilon = Math.max(EPSILON_MIN, epsilon * EPSILON_DECAY);
+        epsilon = Math.max(rl.epsilonMin(), epsilon * rl.epsilonDecay());
     }
 
     public double[] getQValues() { return Q.clone(); }

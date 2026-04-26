@@ -1,0 +1,61 @@
+{
+  "RL_Config": {
+    "episodes": 200,
+    "alpha": 0.3,
+    "gamma": 0.9,
+    "epsilon_start": 0.3,
+    "epsilon_decay": 0.995,
+    "epsilon_min": 0.05,
+    "ucb_c": 2.0
+  },
+  "reward_weights": {
+    "energy":  1.0,
+    "load":    0.0,
+    "latency": 0.0
+  },
+  "actions": {
+    "count": 4,
+    "names": ["EDGE", "PROXY", "CAMERA", "CLOUD"]
+  },
+  "energy_model": {
+    "source": "iFogSim DCNSFog calibration + fog computing scaling laws",
+    "reference_file": "affichage before and after.txt",
+    "baseline_num_cameras": 16,
+    "model_notes": [
+      "Energy formula: energy(action) = idle + perCamera * N * (1 + saturationFactor * N)",
+      "saturation_factor models capacity limits per architecture tier:",
+      "  - EDGE: high (fog routers saturate quickly under load)",
+      "  - PROXY: moderate (single device, mid-range scaling)",
+      "  - CAMERA: high (lightweight nodes, easily overloaded)",
+      "  - CLOUD: zero (elastic infrastructure, no capacity limit)"
+    ],
+    "raw_measurements_n16": {
+      "edge_mode_total_joules":  3749976.42,
+      "cloud_mode_total_joules": 6398596.92,
+      "device_breakdown_edge_mode": {
+        "cloud":           210110.30,
+        "proxy_server":    166866.60,
+        "fog_router_each": 166866.60,
+        "camera_each":     169221.77
+      },
+      "device_breakdown_cloud_mode": {
+        "cloud":          2667422.68,
+        "proxy_server":    166866.60,
+        "fog_router_each": 214678.00,
+        "camera_each":     169221.77
+      }
+    },
+    "profiles": [
+      { "name": "EDGE",   "idle_joules":  400000, "per_camera_joules":  80000, "saturation_factor": 0.15, "overload_base": 0.10, "overload_per_cam": 0.00, "latency": 0.15, "bonus": 0.0 },
+      { "name": "PROXY",  "idle_joules": 1400000, "per_camera_joules":  50000, "saturation_factor": 0.04, "overload_base": 0.40, "overload_per_cam": 0.00, "latency": 0.35, "bonus": 0.0 },
+      { "name": "CAMERA", "idle_joules":  300000, "per_camera_joules": 180000, "saturation_factor": 0.08, "overload_base": 0.20, "overload_per_cam": 0.03, "latency": 0.05, "bonus": 0.0 },
+      { "name": "CLOUD",  "idle_joules": 3400000, "per_camera_joules":  20000, "saturation_factor": 0.00, "overload_base": 0.05, "overload_per_cam": 0.00, "latency": 0.70, "bonus": 0.0 }
+    ]
+  },
+  "deployment": {
+    "EDGE":   { "devices": "fog-*",          "modules": ["object_detector", "object_tracker"] },
+    "PROXY":  { "devices": ["proxy-server"], "modules": ["object_detector", "object_tracker"] },
+    "CAMERA": { "devices": "m-*",            "modules": ["object_detector", "object_tracker"] },
+    "CLOUD":  { "devices": ["cloud"],        "modules": ["object_detector", "object_tracker"] }
+  }
+}

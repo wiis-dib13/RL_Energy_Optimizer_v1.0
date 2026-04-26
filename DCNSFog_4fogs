@@ -44,7 +44,7 @@ import org.fog.utils.distribution.DeterministicDistribution;
  *
  */
 public class DCNSFog {
-	static List<FogDevice> fogDevices = new ArrayList<FogDevice>();
+	static List<FogDevice> fogDevices = new ArrayList<FogDevice>();   //: listes pour stocker tous les dispositifs fog, capteurs et actionneurs créés
 	static List<Sensor> sensors = new ArrayList<Sensor>();
 	static List<Actuator> actuators = new ArrayList<Actuator>();
 	static int numOfAreas = 4;
@@ -62,16 +62,18 @@ public class DCNSFog {
 			Calendar calendar = Calendar.getInstance();
 			boolean trace_flag = false; // mean trace events
 
-			CloudSim.init(num_user, calendar, trace_flag);
+			CloudSim.init(num_user, calendar, trace_flag);  //Initialise le simulateur CloudSim.
+
 
 			String appId = "dcns"; // identifier of the application
 			
 			FogBroker broker = new FogBroker("broker");
 			
 			Application application = createApplication(appId, broker.getId());
-			application.setUserId(broker.getId());
+			application.setUserId(broker.getId());   //Appelle la méthode createApplication (définie plus bas) pour construire le modèle de l'application. Puis associe l'application au broker.
+
 			
-			createFogDevices(broker.getId(), appId);
+			createFogDevices(broker.getId(), appId);  //Crée tous les dispositifs physiques (cloud, proxy, routeurs, caméras) en appelant la méthode définie plus loin
 			
 			
 			Controller controller = null;

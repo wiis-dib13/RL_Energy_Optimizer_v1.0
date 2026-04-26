@@ -1,5 +1,11 @@
 com\fadi\rloptimizer\rl\RLAgent.class
 com\fadi\rloptimizer\api\SimulationController.class
+com\fadi\rloptimizer\rl\EnergyModel.class
+com\fadi\rloptimizer\rl\ModelConfig$RewardWeights.class
+com\fadi\rloptimizer\rl\ModelConfig$EnergyModelSection.class
+com\fadi\rloptimizer\rl\ModelConfig$Root.class
 com\fadi\rloptimizer\api\SimulationStep.class
 com\fadi\rloptimizer\RlOptimizerApplication.class
-com\fadi\rloptimizer\rl\EnergyModel.class
+com\fadi\rloptimizer\rl\ModelConfig$ActionProfile.class
+com\fadi\rloptimizer\rl\ModelConfig$RLConfig.class
+com\fadi\rloptimizer\rl\ModelConfig.class

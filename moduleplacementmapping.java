@@ -1,341 +1,268 @@
-package org.fog.placement;
+package org.fog.test.perfeval;
+
+import org.cloudbus.cloudsim.Log;
+import org.cloudbus.cloudsim.core.CloudSim;
+import org.fog.application.Application;
+import org.fog.entities.*;
+import org.fog.placement.ModuleMapping;
+import org.fog.placement.ModulePlacementMapping;
+import org.fog.utils.TimeKeeper;
 
 import java.util.*;
-import org.fog.application.AppModule;
-import org.fog.application.Application;
-import org.fog.entities.FogDevice;
 
 /**
- * Energy-aware RL Module Placement - OPTIMIZED FOR CLOUD ENERGY REDUCTION
+ * Online Reinforcement Learning for Module Placement
+ * Runs multiple simulation episodes, learns from real energy measurements.
  */
-public class ModulePlacementMapping extends ModulePlacement {
+public class OnlineRLPlacement {
 
-    // ========== HYPERPARAMETERS ==========
-    private static final int EPISODES = 200;
-    private static final double ALPHA = 0.15;
-    private static final double GAMMA = 0.90;
+    private static final int EPISODES = 50;               // number of learning episodes
+    private static final double ALPHA = 0.1;              // learning rate
+    private static final double GAMMA = 0.9;              // discount factor
     private static final double EPSILON_START = 1.0;
-    private static final double EPSILON_MIN = 0.05;
-    private static final double EPSILON_DECAY = 0.99;
-    private static final double UCB_C = 2.0;
-    
-    // CRITICAL: Heavily penalize cloud energy (based on your actual results)
-    private static final double W_ENERGY = 0.85;      // Energy is #1 priority
-    private static final double W_LOAD = 0.10;        // Small overload penalty
-    private static final double W_LATENCY = 0.05;     // Minimal latency weight
-    
-    private static final double SIM_DURATION_SEC = 5000.0;
+    private static final double EPSILON_MIN = 0.1;
+    private static final double EPSILON_DECAY = 0.95;
     private static final int N_ACTIONS = 4;
     private static final String[] ACTION_NAMES = {"EDGE", "PROXY", "CAMERA", "CLOUD"};
-    
-    private final ModuleMapping moduleMapping;
-    
-    // Actual energy values from your simulation (normalized)
-    private static final double CLOUD_ENERGY = 3233631.0;
-    private static final double EDGE_ENERGY = 166866.0;
-    private static final double CAMERA_ENERGY = 169221.0;
-    
-    public ModulePlacementMapping(List<FogDevice> fogDevices,
-                                   Application application,
-                                   ModuleMapping moduleMapping) {
-        this.setFogDevices(fogDevices);
-        this.setApplication(application);
-        this.moduleMapping = moduleMapping;
-        this.setModuleToDeviceMap(new HashMap<>());
-        this.setDeviceToModuleMap(new HashMap<>());
-        this.setModuleInstanceCountMap(new HashMap<>());
-        for (FogDevice d : fogDevices)
-            getModuleInstanceCountMap().put(d.getId(), new HashMap<>());
-        mapModules();
+
+    private double[] Q = new double[N_ACTIONS];
+    private int[] counts = new int[N_ACTIONS];
+    private double epsilon = EPSILON_START;
+    private Random rand = new Random(42);
+
+    public static void main(String[] args) {
+        new OnlineRLPlacement().run();
     }
-    
-    @Override
-    protected void mapModules() {
-        TopologyStats topo = new TopologyStats(getFogDevices());
-        RLAgent agent = new RLAgent(topo);
-        
-        System.out.println("\n" + "=".repeat(70));
-        System.out.println("[RL] ENERGY OPTIMIZATION - CLOUD ENERGY PROBLEM");
-        System.out.println("[RL] Cloud energy: " + String.format("%,.0f", CLOUD_ENERGY) + " J");
-        System.out.println("[RL] Edge energy:   " + String.format("%,.0f", EDGE_ENERGY) + " J");
-        System.out.println("[RL] Ratio: " + String.format("%.1f", CLOUD_ENERGY/EDGE_ENERGY) + "x worse!");
-        System.out.println("=".repeat(70));
-        
-        for (int ep = 0; ep < EPISODES; ep++) {
-            int action = agent.selectAction();
-            double reward = agent.rewardFor(action);
-            agent.update(action, reward);
-            
-            if ((ep + 1) % 40 == 0 || ep == 0) {
-                System.out.printf("[RL] Episode %4d/%d | ε=%.3f | Best: %-6s | Q=%.4f%n",
-                    ep + 1, EPISODES, agent.epsilon,
-                    ACTION_NAMES[agent.greedy()], agent.Q[agent.greedy()]);
-            }
+
+    private void run() {
+        System.out.println("=== Online RL Placement Learning ===");
+        System.out.println("Each episode runs a full simulation with real energy measurement.\n");
+
+        for (int episode = 0; episode < EPISODES; episode++) {
+            // 1. Choose action (epsilon-greedy)
+            int action = selectAction();
+            String placement = ACTION_NAMES[action];
+
+            // 2. Run one simulation with this placement and measure real energy
+            double totalEnergyJoules = runSimulation(placement);
+
+            // 3. Compute reward (negative normalized energy, lower energy = higher reward)
+            // Normalize roughly: max observed energy ~ 3.2e6 J (cloud), min ~ 1.6e5 J (edge)
+            double normalizedEnergy = totalEnergyJoules / 3.5e6;
+            double reward = -normalizedEnergy;   // between -0.9 and -0.05 approx
+
+            // 4. Update Q-value
+            updateQ(action, reward);
+
+            // 5. Print progress
+            System.out.printf("Episode %3d: %-6s → Energy = %8.0f J, Reward = %.3f, Q = %.4f%n",
+                    episode + 1, placement, totalEnergyJoules, reward, Q[action]);
         }
-        
-        int chosen = agent.greedy();
-        System.out.println("=".repeat(70));
-        System.out.println("[RL] ✓ CHOSEN: " + ACTION_NAMES[chosen]);
-        System.out.println("[RL] Expected energy savings: " +
-            String.format("%.1f%%", getEnergySavings(chosen)));
-        agent.printDetailedStats();
-        System.out.println("=".repeat(70));
-        
-        // ─── FIXED: Apply fixed mappings but skip cloud VMs when not deploying to cloud ───
-     // REVERT to original loop (no cloud guard):
-        for (Map.Entry<String, List<String>> entry : moduleMapping.getModuleMapping().entrySet()) {
-            FogDevice device = getDeviceByName(entry.getKey());
-            if (device == null) continue;
-            for (String moduleName : entry.getValue()) {
-                AppModule module = getApplication().getModuleByName(moduleName);
-                if (module != null) createModuleInstanceOnDevice(module, device);
-            }
-        }
-        deployModules(chosen);
-        printPlacementMap();
-        printEnergyRecommendation(chosen);
+
+        // Final policy
+        int best = argmax(Q);
+        System.out.println("\n=== Final policy ===");
+        System.out.println("Best placement: " + ACTION_NAMES[best]);
+        System.out.println("Q-values: " + Arrays.toString(Q));
     }
-    
-    private double getEnergySavings(int action) {
-        double cloudEnergy = CLOUD_ENERGY;
-        double actionEnergy;
-        switch (action) {
-            case 0: actionEnergy = EDGE_ENERGY; break;
-            case 1: actionEnergy = EDGE_ENERGY * 1.2; break;
-            case 2: actionEnergy = CAMERA_ENERGY * 4; break;
-            case 3: actionEnergy = CLOUD_ENERGY; break;
-            default: actionEnergy = CLOUD_ENERGY;
-        }
-        return (1 - actionEnergy / cloudEnergy) * 100;
-    }
-    
-    private void deployModules(int action) {
-        System.out.println("\n[RL] Deploying modules...");
-        switch (action) {
-           /* case 0: // EDGE - BEST for energy
-                for (FogDevice d : getFogDevices())
-                    if (d.getName().startsWith("d-")) {
-                        place("object_detector", d.getName());
-                        place("object_tracker", d.getName());
-                    }
-                System.out.println("[✓] EDGE deployment - Optimal for energy savings");
-                break;*/
-              case 0: // EDGE - BEST for energy
-                   for (FogDevice d : getFogDevices())
-                      if (d.getName().startsWith("d-")) {
-                         place("object_detector", d.getName());
-                         place("object_tracker", d.getName());
-                       }
-                      setCloudToRelayMode(); // <-- ADD THIS LINE
-                      System.out.println("[✓] EDGE deployment - Optimal for energy savings");
-                       break;
-            case 1: // PROXY
-                place("object_detector", "proxy-server");
-                place("object_tracker", "proxy-server");
-                System.out.println("[!] PROXY deployment - Moderate energy usage");
-                break;
-            case 2: // CAMERA
-                for (FogDevice d : getFogDevices())
-                    if (d.getName().startsWith("m-")) {
-                        place("object_detector", d.getName());
-                        place("object_tracker", d.getName());
-                    }
-                System.out.println("[⚠] CAMERA deployment - May cause overload");
-                break;
-            case 3: // CLOUD - WORST for energy
-                place("object_detector", "cloud");
-                place("object_tracker", "cloud");
-                System.out.println("[✗] CLOUD deployment - Highest energy consumption!");
-                break;
-        }
-    }
-    
-    private void printEnergyRecommendation(int action) {
-        System.out.println("\n[RL] ENERGY RECOMMENDATIONS:");
-        if (action == 0) {
-            System.out.println("  ✓ BEST: Edge processing selected");
-            System.out.println("  ✓ Expected energy savings: ~95% vs cloud");
-        } else if (action == 3) {
-            System.out.println("  ✗ WARNING: Cloud selected (high energy)");
-            System.out.println("  → Consider forcing EDGE placement");
+
+    /** Select action using epsilon-greedy */
+    private int selectAction() {
+        if (rand.nextDouble() < epsilon) {
+            // Exploration: choose random action
+            return rand.nextInt(N_ACTIONS);
         } else {
-            System.out.println("  → Consider switching to EDGE for better savings");
+            // Exploitation: choose best action (argmax Q)
+            return argmax(Q);
         }
     }
-    
-    private void place(String moduleName, String deviceName) {
-        AppModule module = getApplication().getModuleByName(moduleName);
-        FogDevice device = getDeviceByName(deviceName);
-        if (module != null && device != null) {
-            createModuleInstanceOnDevice(module, device);
-        }
+
+    /** Update Q(s,a) = Q + α (r + γ max_a' Q(s,a') - Q) */
+    private void updateQ(int action, double reward) {
+        int bestNext = argmax(Q);
+        double maxNextQ = Q[bestNext];
+        double oldQ = Q[action];
+        Q[action] = oldQ + ALPHA * (reward + GAMMA * maxNextQ - oldQ);
+        counts[action]++;
+        // Decay epsilon
+        epsilon = Math.max(EPSILON_MIN, epsilon * EPSILON_DECAY);
     }
-    
-    private void printPlacementMap() {
-        System.out.println("\n[RL] Final Placement:");
-        for (Map.Entry<Integer, List<AppModule>> entry : getDeviceToModuleMap().entrySet()) {
-            String deviceName = getDeviceNameById(entry.getKey());
-            for (AppModule module : entry.getValue()) {
-                System.out.printf("  %s → %s%n", module.getName(), deviceName);
-            }
-        }
+
+    private int argmax(double[] array) {
+        int best = 0;
+        for (int i = 1; i < array.length; i++)
+            if (array[i] > array[best]) best = i;
+        return best;
     }
-    
-    private String getDeviceNameById(int id) {
-        for (FogDevice d : getFogDevices())
-            if (d.getId() == id) return d.getName();
-        return "unknown";
-    }
-    
-    // ========== TOPOLOGY STATISTICS ==========
-    private static class TopologyStats {
-        final Map<String, Double> busyPower = new HashMap<>();
-        final Map<String, Double> idlePower = new HashMap<>();
-        double totalIdleEnergy = 0;
-        
-        TopologyStats(List<FogDevice> devices) {
-            for (FogDevice d : devices) {
-                double busy = d.getHost().getPowerModel().getPower(1.0);
-                double idle = d.getHost().getPowerModel().getPower(0.0);
-                busyPower.put(d.getName(), busy);
-                idlePower.put(d.getName(), idle);
-                totalIdleEnergy += idle * SIM_DURATION_SEC;
-            }
-        }
-        
-        double estimatedEnergy(int action) {
-            // Based on YOUR actual simulation results
-            switch (action) {
-                case 0: return EDGE_ENERGY;      // 166,866 J
-                case 1: return EDGE_ENERGY * 1.2; // ~200,000 J
-                case 2: return CAMERA_ENERGY * 4; // ~676,000 J  
-                case 3: return CLOUD_ENERGY;      // 3,233,631 J
-                default: return CLOUD_ENERGY;
-            }
-        }
-        
-        double overloadScore(int action) {
-            switch (action) {
-                case 0: return 0.10;  // EDGE: sufficient capacity
-                case 1: return 0.40;  // PROXY: moderate
-                case 2: return 0.80;  // CAMERA: easily overloaded
-                case 3: return 0.05;  // CLOUD: unlimited
-                default: return 0.5;
-            }
-        }
-        
-        double latencyScore(int action) {
-            switch (action) {
-                case 0: return 0.15;  // EDGE: close to cameras
-                case 1: return 0.35;  // PROXY: one hop
-                case 2: return 0.05;  // CAMERA: local
-                case 3: return 0.70;  // CLOUD: far
-                default: return 0.5;
-            }
-        }
-    }
-    
-    // ========== RL AGENT ==========
-    private static class RLAgent {
-        final TopologyStats topo;
-        double[] Q = new double[N_ACTIONS];
-        int[] visits = new int[N_ACTIONS];
-        int totalVisits = 0;
-        double epsilon = EPSILON_START;
-        Random rand = new Random(42);
-        final double energyMax = CLOUD_ENERGY;
-        
-        RLAgent(TopologyStats topo) {
-            this.topo = topo;
-            // Initialize Q-values with actual energy data
-            for (int a = 0; a < N_ACTIONS; a++) {
-                Q[a] = rewardFor(a);
-            }
-        }
-        
-        int greedy() {
-            int best = 0;
-            for (int i = 1; i < N_ACTIONS; i++)
-                if (Q[i] > Q[best]) best = i;
-            return best;
-        }
-        
-        int ucbSelect() {
-            int best = 0;
-            double bestValue = Double.NEGATIVE_INFINITY;
-            for (int a = 0; a < N_ACTIONS; a++) {
-                double bonus = (visits[a] == 0) ? Double.MAX_VALUE :
-                    UCB_C * Math.sqrt(Math.log(totalVisits + 1) / visits[a]);
-                double value = Q[a] + bonus;
-                if (value > bestValue) {
-                    bestValue = value;
-                    best = a;
+
+    /**
+     * Runs a full CloudSim simulation with a given module placement choice.
+     * Returns the total energy consumed (Joules) measured from all fog devices.
+     */
+    private double runSimulation(String placementChoice) {
+        try {
+            // Reinitialize CloudSim (required for fresh runs)
+            CloudSim.init(1, Calendar.getInstance(), false);
+
+            String appId = "dcns";
+            FogBroker broker = new FogBroker("broker");
+            Application application = createApplication(appId, broker.getId());
+            application.setUserId(broker.getId());
+
+            // Create fog devices (cloud, proxy, routers, cameras)
+            List<FogDevice> fogDevices = new ArrayList<>();
+            List<Sensor> sensors = new ArrayList<>();
+            List<Actuator> actuators = new ArrayList<>();
+            createFogDevices(fogDevices, sensors, actuators, broker.getId(), appId);
+
+            // Build module mapping (motion_detector always on cameras)
+            ModuleMapping moduleMapping = ModuleMapping.createModuleMapping();
+            for (FogDevice device : fogDevices) {
+                if (device.getName().startsWith("m")) {
+                    moduleMapping.addModuleToDevice("motion_detector", device.getName());
                 }
             }
-            return best;
-        }
-        
-        int selectAction() {
-            return (rand.nextDouble() < epsilon) ? ucbSelect() : greedy();
-        }
-        
-        double rewardFor(int action) {
-            double energy = topo.estimatedEnergy(action);
-            double normEnergy = energy / energyMax;
-            double normLoad = topo.overloadScore(action);
-            double normLatency = topo.latencyScore(action);
-            
-            // Heavily penalize cloud energy
-            double penalty = W_ENERGY * normEnergy + W_LOAD * normLoad + W_LATENCY * normLatency;
-            
-            // Bonus for edge/proxy, penalty for cloud
-            double actionBonus = (action == 0) ? 0.3 : (action == 3) ? -0.5 : 0;
-            
-            return -penalty + actionBonus;
-        }
-        
-        void update(int action, double reward) {
-            double maxNext = Q[greedy()];
-            double alpha = ALPHA / (1 + 0.02 * visits[action]);
-            Q[action] += alpha * (reward + GAMMA * maxNext - Q[action]);
-            visits[action]++;
-            totalVisits++;
-            epsilon = Math.max(EPSILON_MIN, epsilon * EPSILON_DECAY);
-        }
-        
-        void printDetailedStats() {
-            System.out.println("\n[RL] Energy Comparison:");
-            System.out.println("┌─────────┬────────────┬────────────┬──────────────┬──────────┐");
-            System.out.println("│ Action  │ Q-Value    │ Reward     │ Energy (kJ)  │ vs Cloud │");
-            System.out.println("├─────────┼────────────┼────────────┼──────────────┼──────────┤");
-            
-            int best = greedy();
-            for (int a = 0; a < N_ACTIONS; a++) {
-                double energy = topo.estimatedEnergy(a);
-                double savings = (1 - energy / CLOUD_ENERGY) * 100;
-                System.out.printf("│ %-7s │ %10.4f │ %10.4f │ %12.1f │ %+7.0f%% │%s%n",
-                    ACTION_NAMES[a], Q[a], rewardFor(a), energy / 1000, savings,
-                    a == best ? " ← BEST" : "");
+            moduleMapping.addModuleToDevice("user_interface", "cloud");
+
+            // Place object_detector and object_tracker according to learning choice
+            switch (placementChoice) {
+                case "EDGE":
+                    for (FogDevice d : fogDevices)
+                        if (d.getName().startsWith("d-")) {    // routers (fog-*)
+                            moduleMapping.addModuleToDevice("object_detector", d.getName());
+                            moduleMapping.addModuleToDevice("object_tracker", d.getName());
+                        }
+                    break;
+                case "PROXY":
+                    moduleMapping.addModuleToDevice("object_detector", "proxy-server");
+                    moduleMapping.addModuleToDevice("object_tracker", "proxy-server");
+                    break;
+                case "CAMERA":
+                    for (FogDevice d : fogDevices)
+                        if (d.getName().startsWith("m-")) {
+                            moduleMapping.addModuleToDevice("object_detector", d.getName());
+                            moduleMapping.addModuleToDevice("object_tracker", d.getName());
+                        }
+                    break;
+                case "CLOUD":
+                    moduleMapping.addModuleToDevice("object_detector", "cloud");
+                    moduleMapping.addModuleToDevice("object_tracker", "cloud");
+                    break;
             }
-            System.out.println("└─────────┴────────────┴────────────┴──────────────┴──────────┘");
+
+            Controller controller = new Controller("master-controller", fogDevices, sensors, actuators);
+            controller.submitApplication(application,
+                    new ModulePlacementMapping(fogDevices, application, moduleMapping)); // reuses your mapping class but now with correct placement
+
+            TimeKeeper.getInstance().setSimulationStartTime(Calendar.getInstance().getTimeInMillis());
+            CloudSim.startSimulation();
+            CloudSim.stopSimulation();
+
+            // Measure total energy (sum of all devices)
+            double totalEnergy = 0;
+            for (FogDevice fd : fogDevices) {
+                totalEnergy += fd.getTotalEnergyConsumption();  // iFogSim provides this
+            }
+            return totalEnergy;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return 1e9; // penalty value on failure
         }
     }
-    
-    public ModuleMapping getModuleMapping() { return moduleMapping; }
- // Add this new method to ModulePlacementMapping:
-    private void setCloudToRelayMode() {
-        for (FogDevice d : getFogDevices()) {
-            if (d.getName().equals("cloud")) {
-                // Set all PEs to 0 utilization — power model will use idle power only
-                List<org.cloudbus.cloudsim.Host> hosts = d.getHostList();
-                if (hosts != null && !hosts.isEmpty()) {
-                    org.cloudbus.cloudsim.power.PowerHost host =
-                        (org.cloudbus.cloudsim.power.PowerHost) hosts.get(0);
-                    // Override by setting host utilization history to 0
-                    host.getStateHistory().clear();
-                    System.out.println("[RL] Cloud set to relay-only mode (0% utilization)");
-                }
-            }
+
+    private static void createFogDevices(List<FogDevice> fogDevices, List<Sensor> sensors,
+                                         List<Actuator> actuators, int userId, String appId) {
+        // Exactly the same as DCNSFog.createFogDevices but using passed lists
+        FogDevice cloud = createFogDevice("cloud", 44800, 40000, 100, 10000, 0, 0.01, 107.339, 83.4333);
+        cloud.setParentId(-1);
+        fogDevices.add(cloud);
+
+        FogDevice proxy = createFogDevice("proxy-server", 2800, 4000, 10000, 10000, 1, 0.0, 107.339, 83.4333);
+        proxy.setParentId(cloud.getId());
+        proxy.setUplinkLatency(100);
+        fogDevices.add(proxy);
+
+        for (int i = 0; i < 4; i++) {
+            addArea(i+"", fogDevices, sensors, actuators, userId, appId, proxy.getId());
         }
+    }
+
+    private static FogDevice addArea(String id, List<FogDevice> fogDevices, List<Sensor> sensors,
+                                     List<Actuator> actuators, int userId, String appId, int parentId) {
+        FogDevice router = createFogDevice("d-"+id, 2800, 4000, 10000, 10000, 2, 0.0, 107.339, 83.4333);
+        fogDevices.add(router);
+        router.setUplinkLatency(2);
+        for (int i=0; i<4; i++) {
+            String mobileId = id+"-"+i;
+            FogDevice camera = addCamera(mobileId, fogDevices, sensors, actuators, userId, appId, router.getId());
+            camera.setUplinkLatency(2);
+            fogDevices.add(camera);
+        }
+        router.setParentId(parentId);
+        return router;
+    }
+
+    private static FogDevice addCamera(String id, List<FogDevice> fogDevices, List<Sensor> sensors,
+                                       List<Actuator> actuators, int userId, String appId, int parentId) {
+        FogDevice camera = createFogDevice("m-"+id, 500, 1000, 10000, 10000, 3, 0, 87.53, 82.44);
+        camera.setParentId(parentId);
+        Sensor sensor = new Sensor("s-"+id, "CAMERA", userId, appId, new org.fog.utils.distribution.DeterministicDistribution(5));
+        sensors.add(sensor);
+        Actuator ptz = new Actuator("ptz-"+id, userId, appId, "PTZ_CONTROL");
+        actuators.add(ptz);
+        sensor.setGatewayDeviceId(camera.getId());
+        sensor.setLatency(1.0);
+        ptz.setGatewayDeviceId(camera.getId());
+        ptz.setLatency(1.0);
+        return camera;
+    }
+
+    private static Application createApplication(String appId, int userId) {
+        // Same as DCNSFog.createApplication
+        Application app = Application.createApplication(appId, userId);
+        app.addAppModule("object_detector", 10);
+        app.addAppModule("motion_detector", 10);
+        app.addAppModule("object_tracker", 10);
+        app.addAppModule("user_interface", 10);
+        app.addAppEdge("CAMERA", "motion_detector", 1000, 20000, "CAMERA", org.fog.entities.Tuple.UP, AppEdge.SENSOR);
+        app.addAppEdge("motion_detector", "object_detector", 2000, 2000, "MOTION_VIDEO_STREAM", org.fog.entities.Tuple.UP, AppEdge.MODULE);
+        app.addAppEdge("object_detector", "user_interface", 500, 2000, "DETECTED_OBJECT", org.fog.entities.Tuple.UP, AppEdge.MODULE);
+        app.addAppEdge("object_detector", "object_tracker", 1000, 100, "OBJECT_LOCATION", org.fog.entities.Tuple.UP, AppEdge.MODULE);
+        app.addAppEdge("object_tracker", "PTZ_CONTROL", 100, 28, 100, "PTZ_PARAMS", org.fog.entities.Tuple.DOWN, AppEdge.ACTUATOR);
+        app.addTupleMapping("motion_detector", "CAMERA", "MOTION_VIDEO_STREAM", new org.fog.application.selectivity.FractionalSelectivity(1.0));
+        app.addTupleMapping("object_detector", "MOTION_VIDEO_STREAM", "OBJECT_LOCATION", new org.fog.application.selectivity.FractionalSelectivity(1.0));
+        app.addTupleMapping("object_detector", "MOTION_VIDEO_STREAM", "DETECTED_OBJECT", new org.fog.application.selectivity.FractionalSelectivity(0.05));
+        return app;
+    }
+
+    private static FogDevice createFogDevice(String name, long mips, int ram, long upBw, long downBw,
+                                             int level, double ratePerMips, double busyPower, double idlePower) {
+        // Use the exact same implementation as DCNSFog.createFogDevice
+        // (copied from your original code)
+        List<org.cloudbus.cloudsim.Pe> peList = new ArrayList<>();
+        peList.add(new org.cloudbus.cloudsim.Pe(0, new org.cloudbus.cloudsim.sdn.overbooking.PeProvisionerOverbooking(mips)));
+        int hostId = org.fog.utils.FogUtils.generateEntityId();
+        long storage = 1000000;
+        int bw = 10000;
+        org.cloudbus.cloudsim.power.PowerHost host = new org.cloudbus.cloudsim.power.PowerHost(
+                hostId,
+                new org.cloudbus.cloudsim.provisioners.RamProvisionerSimple(ram),
+                new org.cloudbus.cloudsim.sdn.overbooking.BwProvisionerOverbooking(bw),
+                storage,
+                peList,
+                new org.fog.scheduler.StreamOperatorScheduler(peList),
+                new org.fog.utils.FogLinearPowerModel(busyPower, idlePower));
+        List<org.cloudbus.cloudsim.Host> hostList = new ArrayList<>();
+        hostList.add(host);
+        org.fog.entities.FogDeviceCharacteristics characteristics = new org.fog.entities.FogDeviceCharacteristics(
+                "x86", "Linux", "Xen", host, 10.0, 3.0, 0.05, 0.001, 0.0);
+        FogDevice fogdevice = null;
+        try {
+            fogdevice = new FogDevice(name, characteristics, new org.fog.policy.AppModuleAllocationPolicy(hostList),
+                    new LinkedList<>(), 10, upBw, downBw, 0, ratePerMips);
+        } catch (Exception e) { e.printStackTrace(); }
+        fogdevice.setLevel(level);
+        return fogdevice;
     }
 }
